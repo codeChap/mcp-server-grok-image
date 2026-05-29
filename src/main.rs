@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, info, warn};
 
-const GROK_API_URL: &str = "https://api.x.ai/v1/images/generations";
+const GROK_GENERATE_URL: &str = "https://api.x.ai/v1/images/generations";
+const GROK_EDIT_URL: &str = "https://api.x.ai/v1/images/edits";
 
 const VALID_ASPECT_RATIOS: &[&str] = &[
     "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5",
@@ -148,7 +149,7 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
 // --- Grok API request/response types ---
 
 #[derive(Serialize)]
-struct GrokImageRequest {
+struct GrokGenerateRequest {
     model: String,
     prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -156,7 +157,28 @@ struct GrokImageRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    image_url: Option<String>,
+    aspect_ratio: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolution: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GrokImageRef {
+    url: String,
+}
+
+#[derive(Serialize)]
+struct GrokEditRequest {
+    model: String,
+    prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image: Option<GrokImageRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    images: Option<Vec<GrokImageRef>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    n: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     aspect_ratio: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,11 +215,11 @@ struct GenerateImageParams {
     )]
     aspect_ratio: Option<String>,
     #[schemars(
-        description = "Output resolution. Options: \"1k\" (~1024px, default), \"2k\" (~2048px). Supported by grok-imagine-image-pro and grok-imagine-image. Not supported by grok-2-image-1212."
+        description = "Output resolution. Options: \"1k\" (~1024px, default), \"2k\" (~2048px)."
     )]
     resolution: Option<String>,
     #[schemars(
-        description = "Model to use. Options: \"grok-imagine-image-pro\" (default, premium quality, 1k/2k resolution, $0.07/image, 30 RPM), \"grok-imagine-image\" (faster, 1k/2k resolution, $0.02/image, 300 RPM), \"grok-2-image-1212\" (legacy, text-only input, no aspect_ratio or resolution support, $0.07/image, 300 RPM)"
+        description = "Model to use. Default: \"grok-imagine-image\" (1k/2k resolution, $0.02/image, 300 RPM)."
     )]
     model: Option<String>,
     #[schemars(
@@ -209,9 +231,13 @@ struct GenerateImageParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct EditImageParams {
     #[schemars(
-        description = "URL or base64 data URI of the source image to edit. Also accepts a local file path."
+        description = "URL, base64 data URI, or local file path of the source image. Mutually exclusive with `images`."
     )]
-    image_url: String,
+    image_url: Option<String>,
+    #[schemars(
+        description = "Up to 3 source images (URLs, base64 data URIs, or local file paths) for multi-image editing. Reference them in your prompt as <IMAGE_0>, <IMAGE_1>, etc. Mutually exclusive with `image_url`."
+    )]
+    images: Option<Vec<String>>,
     #[schemars(description = "Natural language edit instructions")]
     prompt: String,
     #[schemars(description = "Number of image variations to generate (1-10, default 1)")]
@@ -219,11 +245,15 @@ struct EditImageParams {
     #[schemars(description = "Output format: \"url\" (default, temporary) or \"b64_json\"")]
     response_format: Option<String>,
     #[schemars(
-        description = "Output resolution. Options: \"1k\" (~1024px, default), \"2k\" (~2048px). Supported by grok-imagine-image-pro and grok-imagine-image. Not supported by grok-2-image-1212."
+        description = "Aspect ratio. Options: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, auto"
+    )]
+    aspect_ratio: Option<String>,
+    #[schemars(
+        description = "Output resolution. Options: \"1k\" (~1024px, default), \"2k\" (~2048px)."
     )]
     resolution: Option<String>,
     #[schemars(
-        description = "Model to use. Options: \"grok-imagine-image-pro\" (default, premium quality, 1k/2k resolution, $0.07/image, 30 RPM), \"grok-imagine-image\" (faster, 1k/2k resolution, $0.02/image, 300 RPM), \"grok-2-image-1212\" (legacy, text-only input, no aspect_ratio or resolution support, $0.07/image, 300 RPM)"
+        description = "Model to use. Default: \"grok-imagine-image\" (1k/2k resolution, $0.02/image, 300 RPM)."
     )]
     model: Option<String>,
 }
@@ -284,6 +314,17 @@ fn detect_mime_type(b64: &str) -> &'static str {
     }
 }
 
+/// Normalize a user-supplied image source to a value the API accepts.
+/// HTTP(S) URLs and `data:` URIs pass through; anything else is treated as a local file path.
+fn resolve_image_source(src: &str) -> Result<String, String> {
+    if src.starts_with("http://") || src.starts_with("https://") || src.starts_with("data:") {
+        Ok(src.to_string())
+    } else {
+        info!(path = src, "Encoding local file as data URI for image source");
+        local_file_to_data_uri(src)
+    }
+}
+
 /// Read a local file and convert to a data: URI for the API.
 fn local_file_to_data_uri(path: &str) -> Result<String, String> {
     let data = std::fs::read(path).map_err(|e| format!("Failed to read file {path}: {e}"))?;
@@ -329,16 +370,16 @@ pub struct GrokImageServer {
 }
 
 impl GrokImageServer {
-    async fn call_grok_api(&self, request: &GrokImageRequest) -> Result<GrokImageResponse, String> {
-        debug!(
-            model = request.model,
-            prompt = request.prompt,
-            "Sending request to Grok API"
-        );
+    async fn call_grok_api<R: Serialize>(
+        &self,
+        url: &str,
+        request: &R,
+    ) -> Result<GrokImageResponse, String> {
+        debug!(url, "Sending request to Grok API");
 
         let response = self
             .http
-            .post(GROK_API_URL)
+            .post(url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(request)
             .send()
@@ -505,7 +546,7 @@ impl GrokImageServer {
 
         let model = params
             .model
-            .unwrap_or_else(|| "grok-imagine-image-pro".to_string());
+            .unwrap_or_else(|| "grok-imagine-image".to_string());
 
         // Resolve style
         let (prompt, style_applied) = if let Some(ref style_name) = params.style {
@@ -525,17 +566,16 @@ impl GrokImageServer {
 
         info!(model, prompt, style = ?style_applied, "generate_image called");
 
-        let request = GrokImageRequest {
+        let request = GrokGenerateRequest {
             model,
             prompt: prompt.clone(),
             n: params.n,
             response_format: params.response_format,
-            image_url: None,
             aspect_ratio: params.aspect_ratio,
             resolution: params.resolution,
         };
 
-        match self.call_grok_api(&request).await {
+        match self.call_grok_api(GROK_GENERATE_URL, &request).await {
             Ok(resp) => {
                 let mut contents = Vec::new();
                 if let Some(style_name) = style_applied {
@@ -551,13 +591,12 @@ impl GrokImageServer {
     }
 
     #[tool(
-        description = "Edit an existing image using natural language instructions via Grok's image API"
+        description = "Edit an existing image (or compose up to 3 images) using natural language instructions via Grok's image-to-image API. For multi-image edits, pass `images` and reference each one as <IMAGE_0>, <IMAGE_1>, ..."
     )]
     async fn edit_image(
         &self,
         Parameters(params): Parameters<EditImageParams>,
     ) -> Result<CallToolResult, McpError> {
-        // Validate inputs
         if let Err(e) = validate_common_params(
             params.n,
             params.response_format.as_deref(),
@@ -565,39 +604,75 @@ impl GrokImageServer {
         ) {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
+        if let Err(e) = validate_aspect_ratio(params.aspect_ratio.as_deref()) {
+            return Ok(CallToolResult::error(vec![Content::text(e)]));
+        }
 
-        let model = params
-            .model
-            .unwrap_or_else(|| "grok-imagine-image-pro".to_string());
-
-        // Resolve image_url: local file paths get converted to data URIs
-        let image_url = if params.image_url.starts_with("http://")
-            || params.image_url.starts_with("https://")
-            || params.image_url.starts_with("data:")
-        {
-            params.image_url
-        } else {
-            // Treat as local file path
-            info!(path = params.image_url, "Reading local file for edit_image");
-            match local_file_to_data_uri(&params.image_url) {
-                Ok(uri) => uri,
-                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        let (image_field, images_field) = match (params.image_url, params.images) {
+            (Some(_), Some(_)) => {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "Provide either image_url or images, not both.".to_string(),
+                )]));
+            }
+            (None, None) => {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "Provide either image_url or images.".to_string(),
+                )]));
+            }
+            (Some(src), None) => {
+                let url = match resolve_image_source(&src) {
+                    Ok(u) => u,
+                    Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+                };
+                (Some(GrokImageRef { url }), None)
+            }
+            (None, Some(list)) => {
+                if list.is_empty() {
+                    return Ok(CallToolResult::error(vec![Content::text(
+                        "images must contain at least one source image.".to_string(),
+                    )]));
+                }
+                if list.len() > 3 {
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "images supports at most 3 entries, got {}.",
+                        list.len()
+                    ))]));
+                }
+                let mut refs = Vec::with_capacity(list.len());
+                for src in list {
+                    let url = match resolve_image_source(&src) {
+                        Ok(u) => u,
+                        Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+                    };
+                    refs.push(GrokImageRef { url });
+                }
+                (None, Some(refs))
             }
         };
 
-        info!(model, prompt = params.prompt, "edit_image called");
+        let model = params
+            .model
+            .unwrap_or_else(|| "grok-imagine-image".to_string());
 
-        let request = GrokImageRequest {
+        info!(
+            model,
+            prompt = params.prompt,
+            multi = images_field.is_some(),
+            "edit_image called"
+        );
+
+        let request = GrokEditRequest {
             model,
             prompt: params.prompt,
+            image: image_field,
+            images: images_field,
             n: params.n,
             response_format: params.response_format,
-            image_url: Some(image_url),
-            aspect_ratio: None,
+            aspect_ratio: params.aspect_ratio,
             resolution: params.resolution,
         };
 
-        match self.call_grok_api(&request).await {
+        match self.call_grok_api(GROK_EDIT_URL, &request).await {
             Ok(resp) => {
                 let contents = self.format_response(&resp.data);
                 Ok(CallToolResult::success(contents))
@@ -617,7 +692,8 @@ impl ServerHandler for GrokImageServer {
             ))
             .with_instructions(
                 "Grok image generation server. Use generate_image to create images from text prompts, \
-                 or edit_image to modify existing images with natural language instructions.",
+                 or edit_image to modify a source image (or compose up to 3 source images) with natural \
+                 language instructions. For multi-image edits, pass `images` and reference each as <IMAGE_0>, <IMAGE_1>, ...",
             )
     }
 }

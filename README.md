@@ -21,7 +21,7 @@ Generate an image from a text description.
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `prompt` | string | yes | Text description of the desired image |
-| `model` | string | no | Model to use (default: `grok-imagine-image-pro`) |
+| `model` | string | no | Model to use (default: `grok-imagine-image`) |
 | `n` | integer | no | Number of images to generate (1-10, default 1) |
 | `aspect_ratio` | string | no | Aspect ratio: `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `auto`, etc. |
 | `resolution` | string | no | Output resolution: `1k` (~1024px, default) or `2k` (~2048px) |
@@ -42,7 +42,7 @@ Edit an existing image using natural language instructions.
 |------|------|----------|-------------|
 | `image_url` | string | yes | URL, base64 data URI, or local file path of the source image |
 | `prompt` | string | yes | Natural language edit instructions |
-| `model` | string | no | Model to use (default: `grok-imagine-image-pro`) |
+| `model` | string | no | Model to use (default: `grok-imagine-image`) |
 | `n` | integer | no | Number of variations to generate (1-10, default 1) |
 | `resolution` | string | no | Output resolution: `1k` (~1024px, default) or `2k` (~2048px) |
 | `response_format` | string | no | Output format: `url` (default, temporary) or `b64_json` |
@@ -74,13 +74,9 @@ Returns all available image styles with their name, description, and prompt temp
 
 ### Available Models
 
-| Model | Quality | Resolution | Cost | Rate Limit |
-|-------|---------|------------|------|------------|
-| `grok-imagine-image-pro` | Premium (default) | 1k/2k | $0.07/image | 30 RPM |
-| `grok-imagine-image` | Faster | 1k/2k | $0.02/image | 300 RPM |
-| `grok-2-image-1212` | Legacy | Fixed | $0.07/image | 300 RPM |
-
-Note: The legacy `grok-2-image-1212` model does not support `aspect_ratio` or `resolution` parameters.
+| Model | Resolution | Cost | Rate Limit |
+|-------|------------|------|------------|
+| `grok-imagine-image` (default) | 1k/2k | $0.02/image | 300 RPM |
 
 ## Prerequisites
 
