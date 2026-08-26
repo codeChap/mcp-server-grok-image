@@ -2,11 +2,8 @@ use base64::Engine;
 use image::imageops::{self, FilterType};
 use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 use rmcp::{
-    ErrorData as McpError, ServerHandler, ServiceExt,
-    handler::server::tool::ToolRouter,
-    handler::server::wrapper::Parameters,
-    model::*,
-    tool, tool_handler, tool_router,
+    ErrorData as McpError, ServerHandler, ServiceExt, handler::server::tool::ToolRouter,
+    handler::server::wrapper::Parameters, model::*, tool, tool_handler, tool_router,
     transport::stdio,
 };
 use schemars::JsonSchema;
@@ -21,8 +18,8 @@ const GROK_GENERATE_URL: &str = "https://api.x.ai/v1/images/generations";
 const GROK_EDIT_URL: &str = "https://api.x.ai/v1/images/edits";
 
 const VALID_ASPECT_RATIOS: &[&str] = &[
-    "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5",
-    "20:9", "9:20", "auto",
+    "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9",
+    "9:20", "auto",
 ];
 
 // --- Styles ---
@@ -35,20 +32,76 @@ struct Style {
 }
 
 const BUILTIN_STYLES: &[(&str, &str, &str)] = &[
-    ("watercolor", "Watercolor painting style", "{prompt}, as a watercolor painting"),
-    ("oil-painting", "Oil painting with visible brushstrokes", "{prompt}, as an oil painting with visible brushstrokes"),
-    ("pencil-sketch", "Detailed pencil sketch", "{prompt}, as a detailed pencil sketch"),
-    ("pixel-art", "Retro pixel art", "{prompt}, as retro pixel art"),
-    ("anime", "Anime style illustration", "{prompt}, in anime style"),
-    ("pop-art", "Bold pop art style", "{prompt}, in bold pop art style"),
-    ("art-nouveau", "Art nouveau with flowing organic lines", "{prompt}, in art nouveau style with flowing organic lines"),
-    ("cinematic", "Cinematic photography with dramatic lighting", "{prompt}, cinematic photography with dramatic lighting"),
-    ("portrait", "Professional portrait photography", "{prompt}, professional portrait photography with shallow depth of field"),
-    ("macro", "Extreme macro photography", "{prompt}, extreme macro photography with sharp detail"),
-    ("aerial", "Aerial drone photography", "{prompt}, aerial drone photography"),
-    ("studio", "Studio photography on clean background", "{prompt}, studio photography on clean background with controlled lighting"),
-    ("noir", "Dark film noir style", "{prompt}, in dark film noir style with high contrast black and white"),
-    ("vintage", "Faded vintage photograph", "{prompt}, as a faded vintage photograph with warm tones"),
+    (
+        "watercolor",
+        "Watercolor painting style",
+        "{prompt}, as a watercolor painting",
+    ),
+    (
+        "oil-painting",
+        "Oil painting with visible brushstrokes",
+        "{prompt}, as an oil painting with visible brushstrokes",
+    ),
+    (
+        "pencil-sketch",
+        "Detailed pencil sketch",
+        "{prompt}, as a detailed pencil sketch",
+    ),
+    (
+        "pixel-art",
+        "Retro pixel art",
+        "{prompt}, as retro pixel art",
+    ),
+    (
+        "anime",
+        "Anime style illustration",
+        "{prompt}, in anime style",
+    ),
+    (
+        "pop-art",
+        "Bold pop art style",
+        "{prompt}, in bold pop art style",
+    ),
+    (
+        "art-nouveau",
+        "Art nouveau with flowing organic lines",
+        "{prompt}, in art nouveau style with flowing organic lines",
+    ),
+    (
+        "cinematic",
+        "Cinematic photography with dramatic lighting",
+        "{prompt}, cinematic photography with dramatic lighting",
+    ),
+    (
+        "portrait",
+        "Professional portrait photography",
+        "{prompt}, professional portrait photography with shallow depth of field",
+    ),
+    (
+        "macro",
+        "Extreme macro photography",
+        "{prompt}, extreme macro photography with sharp detail",
+    ),
+    (
+        "aerial",
+        "Aerial drone photography",
+        "{prompt}, aerial drone photography",
+    ),
+    (
+        "studio",
+        "Studio photography on clean background",
+        "{prompt}, studio photography on clean background with controlled lighting",
+    ),
+    (
+        "noir",
+        "Dark film noir style",
+        "{prompt}, in dark film noir style with high contrast black and white",
+    ),
+    (
+        "vintage",
+        "Faded vintage photograph",
+        "{prompt}, as a faded vintage photograph with warm tones",
+    ),
 ];
 
 fn build_styles(custom: &[StyleConfig]) -> Vec<Style> {
@@ -291,9 +344,7 @@ struct HeadshotParams {
         description = "Padded canvas width (px). Default 780. Height follows the resized source (not forced 3:2)."
     )]
     canvas_width: Option<u32>,
-    #[schemars(
-        description = "Output resolution: \"1k\" or \"2k\" (default \"2k\")."
-    )]
+    #[schemars(description = "Output resolution: \"1k\" or \"2k\" (default \"2k\").")]
     resolution: Option<String>,
     #[schemars(
         description = "Optional absolute path for the final image (also saved under save_dir)."
@@ -328,7 +379,9 @@ fn validate_common_params(
     }
     if let Some(res) = resolution {
         if res != "1k" && res != "2k" {
-            return Err(format!("resolution must be \"1k\" or \"2k\", got \"{res}\""));
+            return Err(format!(
+                "resolution must be \"1k\" or \"2k\", got \"{res}\""
+            ));
         }
     }
     Ok(())
@@ -369,7 +422,10 @@ fn resolve_image_source(src: &str) -> Result<String, String> {
     if src.starts_with("http://") || src.starts_with("https://") || src.starts_with("data:") {
         Ok(src.to_string())
     } else {
-        info!(path = src, "Encoding local file as data URI for image source");
+        info!(
+            path = src,
+            "Encoding local file as data URI for image source"
+        );
         local_file_to_data_uri(src)
     }
 }
@@ -470,13 +526,7 @@ fn pad_to_headshot_canvas(
     Ok(canvas)
 }
 
-fn gravity_offset(
-    gravity: &str,
-    cw: u32,
-    ch: u32,
-    nw: u32,
-    nh: u32,
-) -> Result<(u32, u32), String> {
+fn gravity_offset(gravity: &str, cw: u32, ch: u32, nw: u32, nh: u32) -> Result<(u32, u32), String> {
     let g = gravity.to_ascii_lowercase().replace(['_', '-'], "");
     let x_left = 0u32;
     let x_center = cw.saturating_sub(nw) / 2;
@@ -719,8 +769,9 @@ impl GrokImageServer {
             .map_err(|e| format!("Failed to decode base64: {e}"))?;
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create parent dir {}: {e}", parent.display()))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    format!("Failed to create parent dir {}: {e}", parent.display())
+                })?;
             }
         }
         std::fs::write(path, &bytes)
@@ -772,7 +823,9 @@ impl GrokImageServer {
         }
     }
 
-    #[tool(description = "List available image styles that can be used with generate_image's style parameter")]
+    #[tool(
+        description = "List available image styles that can be used with generate_image's style parameter"
+    )]
     async fn list_styles(&self) -> Result<CallToolResult, McpError> {
         let mut lines = Vec::new();
         for s in self.styles.iter() {
@@ -781,7 +834,9 @@ impl GrokImageServer {
                 s.name, s.description, s.template
             ));
         }
-        Ok(CallToolResult::success(vec![Content::text(lines.join("\n\n"))]))
+        Ok(CallToolResult::success(vec![Content::text(
+            lines.join("\n\n"),
+        )]))
     }
 
     #[tool(description = "Generate an image from a text prompt using Grok's image generation API")]
@@ -945,7 +1000,8 @@ impl GrokImageServer {
         &self,
         Parameters(params): Parameters<HeadshotParams>,
     ) -> Result<CallToolResult, McpError> {
-        if let Err(e) = validate_common_params(params.n, Some("b64_json"), params.resolution.as_deref())
+        if let Err(e) =
+            validate_common_params(params.n, Some("b64_json"), params.resolution.as_deref())
         {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
@@ -963,9 +1019,7 @@ impl GrokImageServer {
             .unwrap_or("North");
         let content_width = params.content_width.unwrap_or(550);
         let canvas_width = params.canvas_width.unwrap_or(780);
-        let resolution = params
-            .resolution
-            .unwrap_or_else(|| "2k".to_string());
+        let resolution = params.resolution.unwrap_or_else(|| "2k".to_string());
         // New Imagine quality model — better edit fidelity than grok-imagine-image
         let model = params
             .model
@@ -979,11 +1033,7 @@ impl GrokImageServer {
 
         info!(
             model,
-            gravity,
-            content_width,
-            canvas_width,
-            resolution,
-            "headshot called"
+            gravity, content_width, canvas_width, resolution, "headshot called"
         );
 
         // 1) Load source → 2) letterbox pad (no crop) → 3) expand-only edit
@@ -999,17 +1049,15 @@ impl GrokImageServer {
                 ))]));
             }
         };
-        let padded = match pad_to_headshot_canvas(&dyn_img, content_width, canvas_width, gravity)
-        {
+        let padded = match pad_to_headshot_canvas(&dyn_img, content_width, canvas_width, gravity) {
             Ok(p) => p,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
         let (pad_w, pad_h) = padded.dimensions();
         let mut jpeg_buf = Vec::new();
-        if let Err(e) = DynamicImage::ImageRgb8(padded).write_to(
-            &mut Cursor::new(&mut jpeg_buf),
-            ImageFormat::Jpeg,
-        ) {
+        if let Err(e) = DynamicImage::ImageRgb8(padded)
+            .write_to(&mut Cursor::new(&mut jpeg_buf), ImageFormat::Jpeg)
+        {
             return Ok(CallToolResult::error(vec![Content::text(format!(
                 "Failed to encode padded JPEG: {e}"
             ))]));
@@ -1049,10 +1097,8 @@ impl GrokImageServer {
                 let mut contents = vec![Content::text(format!(
                     "Headshot pipeline: white letterbox {content_width}→{pad_w}×{pad_h} (gravity {gravity}) → expand-only (no cutout)\nPrompt: {prompt}"
                 ))];
-                contents.extend(self.format_response_with_output(
-                    &resp.data,
-                    output_path.as_deref(),
-                ));
+                contents
+                    .extend(self.format_response_with_output(&resp.data, output_path.as_deref()));
                 Ok(CallToolResult::success(contents))
             }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
