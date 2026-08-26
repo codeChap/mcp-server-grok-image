@@ -10,6 +10,7 @@ Communicates via stdio using JSON-RPC 2.0, like all MCP servers.
 |------|-------------|
 | `generate_image` | Generate an image from a text prompt |
 | `edit_image` | Edit an existing image using natural language instructions |
+| `headshot` | Corporate headshot from a source portrait (pad to 3:2 + fixed edit prompt) |
 | `list_styles` | List available image styles for use with `generate_image` |
 
 ### generate_image
@@ -48,6 +49,34 @@ Edit an existing image using natural language instructions.
 | `response_format` | string | no | Output format: `url` (default, temporary) or `b64_json` |
 
 Note: The `style` parameter is intentionally not available on `edit_image` -- edit prompts are instructions (e.g. "remove the background"), not descriptions, so wrapping them in style templates would produce nonsense.
+
+### headshot
+
+**Expand-only** portrait fix (Gemini pipeline equivalent on Imagine). Does **not** reframe pose, cut out hair, or redesign the person.
+
+1. Resize full source (default 550px wide) — **never crop**
+2. Letterbox with **white** gutters to canvas width (default 780)
+3. Call **`grok-imagine-image-quality`**: complete cut-off shoulders if needed; clean solid **white background**; keep face/hair/pose/clothing/logos
+
+**No cutout / no rembg / no transparent alpha** — same job as the original Gemini headshot skill.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `image` | string | yes | Local path, http(s) URL, or `data:` URI |
+| `clothing` | string | no | For missing-shoulder fill only |
+| `notes` | string | no | Must-preserve details (glasses, exact logo text, …) |
+| `pronoun` | string | no | `his` / `her` / `their` (default `their`) |
+| `gravity` | string | no | Letterbox gravity (`North` default) |
+| `content_width` | integer | no | Resize width before pad (default `550`) |
+| `canvas_width` | integer | no | Padded width (default `780`) |
+| `resolution` | string | no | `1k` or `2k` (default `2k`) |
+| `output_path` | string | no | Optional final path (also under `save_dir`) |
+| `n` | integer | no | Variations (1–10, default 1) |
+| `model` | string | no | Default **`grok-imagine-image-quality`** |
+
+Padded intermediate: `save_dir/headshot-padded_*.jpg`.
 
 ### list_styles
 
