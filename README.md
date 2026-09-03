@@ -22,10 +22,11 @@ Generate an image from a text description.
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `prompt` | string | yes | Text description of the desired image |
-| `model` | string | no | Model to use (default: `grok-imagine-image`) |
+| `model` | string | no | Model to use (default: `grok-imagine-image-2.0`) |
 | `n` | integer | no | Number of images to generate (1-10, default 1) |
-| `aspect_ratio` | string | no | Aspect ratio: `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `auto`, etc. |
+| `aspect_ratio` | string | no | Aspect ratio: `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` |
 | `resolution` | string | no | Output resolution: `1k` (~1024px, default) or `2k` (~2048px) |
+| `quality` | string | no | `low`, `medium`, or `auto` (2.0 only; omitted = `auto`. Auto currently serves `low` for generation) |
 | `response_format` | string | no | Output format: `url` (default, temporary) or `b64_json` |
 | `style` | string | no | Style name to apply (use `list_styles` to see options) |
 
@@ -41,12 +42,17 @@ Edit an existing image using natural language instructions.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `image_url` | string | yes | URL, base64 data URI, or local file path of the source image |
+| `image_url` | string | no* | URL, base64 data URI, or local file path of the source image. Mutually exclusive with `images`. |
+| `images` | string[] | no* | Up to 5 source images for multi-image editing. Reference them in the prompt as `<IMAGE_0>`, `<IMAGE_1>`, … |
 | `prompt` | string | yes | Natural language edit instructions |
-| `model` | string | no | Model to use (default: `grok-imagine-image`) |
+| `model` | string | no | Model to use (default: `grok-imagine-image-2.0`) |
 | `n` | integer | no | Number of variations to generate (1-10, default 1) |
+| `aspect_ratio` | string | no | Same set as `generate_image`, including `21:9` and `5:2` |
 | `resolution` | string | no | Output resolution: `1k` (~1024px, default) or `2k` (~2048px) |
+| `quality` | string | no | `low`, `medium`, or `auto` (2.0 only; omitted = `auto`. Auto currently serves `medium` for editing) |
 | `response_format` | string | no | Output format: `url` (default, temporary) or `b64_json` |
+
+\* Provide either `image_url` or `images`.
 
 Note: The `style` parameter is intentionally not available on `edit_image` -- edit prompts are instructions (e.g. "remove the background"), not descriptions, so wrapping them in style templates would produce nonsense.
 
@@ -56,7 +62,7 @@ Note: The `style` parameter is intentionally not available on `edit_image` -- ed
 
 1. Resize full source (default 550px wide) — **never crop**
 2. Letterbox with **white** gutters to canvas width (default 780)
-3. Call **`grok-imagine-image-quality`**: complete cut-off shoulders if needed; clean solid **white background**; keep face/hair/pose/clothing/logos
+3. Call **`grok-imagine-image-2.0`** at **quality medium**: complete cut-off shoulders if needed; clean solid **white background**; keep face/hair/pose/clothing/logos
 
 **No cutout / no rembg / no transparent alpha** — same job as the original Gemini headshot skill.
 
@@ -74,7 +80,8 @@ Note: The `style` parameter is intentionally not available on `edit_image` -- ed
 | `resolution` | string | no | `1k` or `2k` (default `2k`) |
 | `output_path` | string | no | Optional final path (also under `save_dir`) |
 | `n` | integer | no | Variations (1–10, default 1) |
-| `model` | string | no | Default **`grok-imagine-image-quality`** |
+| `quality` | string | no | `low` / `medium` / `auto` (default **`medium`**) |
+| `model` | string | no | Default **`grok-imagine-image-2.0`** |
 
 Padded intermediate: `save_dir/headshot-padded_*.jpg`.
 
@@ -103,9 +110,11 @@ Returns all available image styles with their name, description, and prompt temp
 
 ### Available Models
 
-| Model | Resolution | Cost | Rate Limit |
-|-------|------------|------|------------|
-| `grok-imagine-image` (default) | 1k/2k | $0.02/image | 300 RPM |
+| Model | Notes |
+|-------|-------|
+| `grok-imagine-image-2.0` (default) | Optional `quality` (`low` / `medium` / `auto`), up to 5 edit references, `21:9` and `5:2`. Auto currently serves `low` for generation and `medium` for editing. |
+| `grok-imagine-image` | 1.0. Still available; no `quality` param. |
+| `grok-imagine-image-quality` | Retires **2026-11-02**. After that the slug is served by `grok-imagine-image-2.0` at `quality: low` ($0.01 less per image than the quality model). |
 
 ## Prerequisites
 
@@ -180,7 +189,14 @@ Add to your Claude Desktop config (`~/.config/Claude/claude_desktop_config.json`
 
 ```
 src/
-  main.rs  - everything: config, styles, API types, MCP server, tool definitions
+  main.rs      process entry (stdio MCP)
+  config.rs    TOML / env config
+  styles.rs    built-in + custom styles
+  grok.rs      xAI request/response types
+  params.rs    MCP tool params + validation
+  image_io.rs  data URIs, local files, mime, fetch
+  headshot.rs  letterbox pad + expand prompt
+  server.rs    MCP tools and Grok HTTP
 ```
 
 ## License
